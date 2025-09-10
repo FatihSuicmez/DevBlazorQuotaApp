@@ -23,6 +23,9 @@ builder.Services.AddSingleton(quotaSettings);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+builder.Services.AddEndpointsApiExplorer(); // Minimal API'leri keşfetmek için gereklidir.
+builder.Services.AddSwaggerGen(); // // Swagger JSON üreticisini ekler.
+
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityUserAccessor>();
 builder.Services.AddScoped<IdentityRedirectManager>();
@@ -61,6 +64,8 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseMigrationsEndPoint();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 else
 {
