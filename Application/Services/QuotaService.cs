@@ -1,8 +1,6 @@
-// Application/Services/QuotaService.cs
-
 using Microsoft.EntityFrameworkCore;
 using QuotaApp.Application.DTOs;
-using QuotaApp.Application.Settings; // Ayar sınıfı için yeni using ifadesi
+using QuotaApp.Application.Settings;
 using QuotaApp.Domain.Entities;
 using QuotaApp.Infrastructure;
 using QuotaApp.Presentation.ApiEndpoints;
@@ -12,52 +10,64 @@ namespace QuotaApp.Application.Services;
 
 public class QuotaService : IQuotaService
 {
-    private readonly ApplicationDbContext _db;
-    private readonly QuotaSettings _quotaSettings; // Sabit sayıların yerini alan ayar nesnesi
+    private readonly IDbContextFactory<ApplicationDbContext> _dbContextFactory;
+    private readonly QuotaSettings _quotaSettings;
     private readonly TimeSpan _istanbulOffset = TimeSpan.FromHours(3);
 
-    // Constructor (Yapıcı Metot), DbContext ile birlikte artık QuotaSettings'i de alıyor.
-    public QuotaService(ApplicationDbContext db, QuotaSettings quotaSettings)
+    public QuotaService(IDbContextFactory<ApplicationDbContext> dbContextFactory, QuotaSettings quotaSettings)
     {
-        _db = db;
+        _dbContextFactory = dbContextFactory;
         _quotaSettings = quotaSettings;
     }
 
+    // Bu metot, sadece kota bilgisini GÖRÜNTÜLEMEK için kullanılır.
     public async Task<UsageInfo> GetUsageAsync(string userId)
     {
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+
         var utcNow = DateTime.UtcNow;
         var (dayStartUtc, _, monthStartUtc, _, dayResetLocal, monthResetLocal) = CalculateTimeWindows(utcNow);
         
-        var dailyUsed = await _db.SearchLogs.CountAsync(q => q.UserId == userId && q.CreatedAtUtc >= dayStartUtc);
-        var monthlyUsed = await _db.SearchLogs.CountAsync(q => q.UserId == userId && q.CreatedAtUtc >= monthStartUtc);
+        var dailyUsed = await db.SearchLogs.CountAsync(q => q.UserId == userId && q.CreatedAtUtc >= dayStartUtc);
+        var monthlyUsed = await db.SearchLogs.CountAsync(q => q.UserId == userId && q.CreatedAtUtc >= monthStartUtc);
 
         return new UsageInfo
         {
             DayUsed = dailyUsed,
-            DayRemaining = Math.Max(0, _quotaSettings.DailyLimit - dailyUsed), // Sabit '5' yerine ayar kullanılıyor
+            DayRemaining = Math.Max(0, _quotaSettings.DailyLimit - dailyUsed),
             MonthUsed = monthlyUsed,
-            MonthRemaining = Math.Max(0, _quotaSettings.MonthlyLimit - monthlyUsed), // Sabit '20' yerine ayar kullanılıyor
+            MonthRemaining = Math.Max(0, _quotaSettings.MonthlyLimit - monthlyUsed),
             DayResetAtLocal = dayResetLocal,
             MonthResetAtLocal = monthResetLocal
         };
     }
 
+    // Bu metot, sorgulama işleminin tamamını TEK BİR İŞLEM olarak yürütür.
     public async Task<(UsageInfo usage, List<string> results)> TryConsumeAndSearchAsync(string userId, SearchRequestDto request)
     {
-        await using var transaction = await _db.Database.BeginTransactionAsync();
+        // 1. Tüm operasyon için tek bir DbContext oluştur.
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+        
+        // 2. Tüm operasyon için tek bir Transaction başlat.
+        await using var transaction = await db.Database.BeginTransactionAsync();
 
-        var currentUsage = await GetUsageAsync(userId);
-
-        if (currentUsage.DayRemaining <= 0)
+        var utcNow = DateTime.UtcNow;
+        var (dayStartUtc, _, monthStartUtc, _, _, _) = CalculateTimeWindows(utcNow);
+        
+        // 3. Kota kontrolünü bu DbContext üzerinden yap.
+        var dailyUsed = await db.SearchLogs.CountAsync(q => q.UserId == userId && q.CreatedAtUtc >= dayStartUtc);
+        if (dailyUsed >= _quotaSettings.DailyLimit)
         {
-            throw new QuotaException("DAILY_LIMIT_EXCEEDED", "Günlük limitiniz (5) doldu. Yarın tekrar deneyin.");
+            throw new QuotaException("DAILY_LIMIT_EXCEEDED", $"Günlük limitiniz ({_quotaSettings.DailyLimit}) doldu. Yarın tekrar deneyin.");
         }
             
-        if (currentUsage.MonthRemaining <= 0)
+        var monthlyUsed = await db.SearchLogs.CountAsync(q => q.UserId == userId && q.CreatedAtUtc >= monthStartUtc);
+        if (monthlyUsed >= _quotaSettings.MonthlyLimit)
         {
-            throw new QuotaException("MONTHLY_LIMIT_EXCEEDED", "Aylık toplam hakkınız (20) doldu. Bir sonraki ay tekrar deneyin.");
+            throw new QuotaException("MONTHLY_LIMIT_EXCEEDED", $"Aylık toplam hakkınız ({_quotaSettings.MonthlyLimit}) doldu. Bir sonraki ay tekrar deneyin.");
         }
 
+        // 4. Log kaydını bu DbContext'e ekle.
         var searchLog = new SearchLog
         {
             UserId = userId,
@@ -70,36 +80,34 @@ public class QuotaService : IQuotaService
             HasSite = request.HasSite,
             SiteId = request.SiteId
         };
-        _db.SearchLogs.Add(searchLog);
-        await _db.SaveChangesAsync();
+        db.SearchLogs.Add(searchLog);
         
+        // 5. Değişiklikleri veritabanına kaydet. Hata burada oluşuyordu.
+        await db.SaveChangesAsync();
+        
+        // 6. Arama sorgusunu bu DbContext üzerinden yap.
         List<string> results;
-        var neighbourhoodId = request.NeighbourhoodId;
-
         if (request.HasStreet && request.StreetId.HasValue && request.StreetId > 0)
         {
-            results = await _db.Streets
+            results = await db.Streets
                 .Where(s => s.Id == request.StreetId.Value)
                 .Select(s => $"[Cadde Sonucu] {s.Name}")
-                .Take(20)
-                .ToListAsync();
+                .Take(20).ToListAsync();
         }
         else if (request.HasSite && request.SiteId.HasValue && request.SiteId > 0)
         {
-             results = await _db.Sites
+             results = await db.Sites
                 .Where(s => s.Id == request.SiteId.Value)
                 .Select(s => $"[Site Sonucu] {s.Name}")
-                .Take(20)
-                .ToListAsync();
+                .Take(20).ToListAsync();
         }
-        else if (neighbourhoodId.HasValue && neighbourhoodId > 0)
+        else if (request.NeighbourhoodId.HasValue && request.NeighbourhoodId > 0)
         {
-            results = await _db.Streets
-                .Where(s => s.NeighbourhoodId == neighbourhoodId)
+            results = await db.Streets
+                .Where(s => s.NeighbourhoodId == request.NeighbourhoodId)
                 .OrderBy(s => s.Name)
                 .Select(s => $"[Örnek Cadde] {s.Name}")
-                .Take(3)
-                .ToListAsync();
+                .Take(3).ToListAsync();
         }
         else
         {
@@ -111,8 +119,10 @@ public class QuotaService : IQuotaService
             results.Add("Aramanızla eşleşen sonuç bulunamadı.");
         }
 
+        // 7. Her şey başarılıysa Transaction'ı onayla.
         await transaction.CommitAsync();
         
+        // 8. En güncel kota bilgisini almak için ana metodu çağır.
         var finalUsage = await GetUsageAsync(userId);
         return (finalUsage, results);
     }

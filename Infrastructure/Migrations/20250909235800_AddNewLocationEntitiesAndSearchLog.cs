@@ -310,18 +310,24 @@ namespace QuotaApp.Infrastructure.Migrations
                     { 203, "Kızılay", 103 }
                 });
             
-            // --- YENİ EKLENEN STREET VE SITE VERİLERİ ---
+            // --- GÜNCELLENMİŞ STREET VE SITE VERİLERİ ---
             migrationBuilder.InsertData(
                 table: "Streets",
                 columns: new[] { "Id", "Name", "NeighbourhoodId" },
                 values: new object[,]
                 {
+                    // Caferağa (201) için 3 cadde
                     { 301, "Bahariye Caddesi", 201 },
                     { 302, "Mühürdar Caddesi", 201 },
                     { 303, "Sakız Gülü Sokak", 201 },
-                    { 304, "Atatürk Bulvarı", 203 },
-                    { 305, "İzmir Caddesi", 203 },
-                    { 306, "Yüksel Caddesi", 203 }
+                    // Fenerbahçe (202) için 3 cadde (YENİ)
+                    { 304, "Fener Kalamış Caddesi", 202 },
+                    { 305, "Münir Nurettin Selçuk Caddesi", 202 },
+                    { 306, "Dr. Faruk Ayanoğlu Caddesi", 202 },
+                    // Kızılay (203) için 3 cadde
+                    { 307, "Atatürk Bulvarı", 203 },
+                    { 308, "İzmir Caddesi", 203 },
+                    { 309, "Yüksel Caddesi", 203 }
                 });
 
             migrationBuilder.InsertData(
@@ -329,12 +335,18 @@ namespace QuotaApp.Infrastructure.Migrations
                 columns: new[] { "Id", "Name", "NeighbourhoodId" },
                 values: new object[,]
                 {
-                    { 401, "Fenerbahçe Orduevi Sitesi", 202 },
-                    { 402, "Marina Sitesi", 202 },
-                    { 403, "Yeşil Konaklar", 202 },
-                    { 404, "Kızılay AVM Sitesi", 203 },
-                    { 405, "Güven Park Evleri", 203 },
-                    { 406, "Mithatpaşa Konutları", 203 }
+                    // Caferağa (201) için 3 site (YENİ)
+                    { 401, "Moda Deniz Kulübü Konutları", 201 },
+                    { 402, "Süreyya Operası Apartmanları", 201 },
+                    { 403, "Bahariye Sanat Merkezi Sitesi", 201 },
+                    // Fenerbahçe (202) için 3 site
+                    { 404, "Fenerbahçe Orduevi Sitesi", 202 },
+                    { 405, "Marina Sitesi", 202 },
+                    { 406, "Yeşil Konaklar", 202 },
+                    // Kızılay (203) için 3 site
+                    { 407, "Kızılay AVM Sitesi", 203 },
+                    { 408, "Güven Park Evleri", 203 },
+                    { 409, "Mithatpaşa Konutları", 203 }
                 });
 
 
