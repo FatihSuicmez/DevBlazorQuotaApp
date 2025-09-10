@@ -327,3 +327,5 @@ While the application is running, navigate to the **`/swagger`** address in your
   After logging in, you can successfully send requests using the "Try it out" feature in the Swagger UI.
 
 </details>
+
+---
