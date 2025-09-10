@@ -1,0 +1,339 @@
+﻿@page "/"
+@using System.Security.Claims
+@using Microsoft.EntityFrameworkCore
+@using QuotaApp.Application
+@using QuotaApp.Application.DTOs
+@using QuotaApp.Presentation.ApiEndpoints
+@using QuotaApp.Infrastructure
+
+@inject IQuotaService QuotaService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+@rendermode InteractiveServer
+
+<PageTitle>Adres Sorgulama</PageTitle>
+
+<AuthorizeView>
+    <NotAuthorized>
+        <div class="container mt-4">
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card text-center shadow-sm">
+                        <div class="card-header">
+                            <h4 class="my-2">Veri Sorgulama Platformuna Hoş Geldiniz!</h4>
+                        </div>
+                        <div class="card-body">
+                            <p class="card-text">Bu platform, günlük ve aylık limitler dahilinde adres sorgulaması yapmanıza olanak tanır.</p>
+                            <p class="card-text">Kullanım haklarınızı görüntülemek ve sorgulama yapmaya başlamak için lütfen giriş yapın veya yeni bir hesap oluşturun.</p>
+                            <a href="Account/Login" class="btn btn-primary">Giriş Yap</a>
+                            <a href="Account/Register" class="btn btn-secondary">Kayıt Ol</a>
+                        </div>
+                        <div class="card-footer text-muted">
+                            Günlük 5 / Aylık 20 Sorgu Hakkı
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </NotAuthorized>
+    <Authorized Context="authContext">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+             <h1 class="mb-0">Adres Sorgulama Arayüzü</h1>
+             <span class="text-muted">Hoş geldin, @authContext.User.Identity?.Name!</span>
+        </div>
+
+        @if (isPageLoading)
+        {
+            <div class="d-flex justify-content-center mt-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Yükleniyor...</span></div></div>
+        }
+        else if (usageInfo is not null)
+        {
+            <div class="card shadow-sm mb-4">
+                <div class="card-header"><h5 class="mb-0">Kullanım Durumu</h5></div>
+                <div class="card-body">
+                     <div class="row">
+                        <div class="col-md-6 mb-3 mb-md-0">
+                            <label class="form-label">Günlük Hak</label>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar" role="progressbar" style="width: @(usageInfo.DayUsed * 20)%" aria-valuenow="@usageInfo.DayUsed" aria-valuemin="0" aria-valuemax="5">
+                                    <strong>@usageInfo.DayUsed / 5</strong>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Aylık Hak</label>
+                            <div class="progress" style="height: 25px;">
+                                <div class="progress-bar bg-success" role="progressbar" style="width: @(usageInfo.MonthUsed * 5)%" aria-valuenow="@usageInfo.MonthUsed" aria-valuemin="0" aria-valuemax="20">
+                                    <strong>@usageInfo.MonthUsed / 20</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm">
+                 <div class="card-header"><h5 class="mb-0">Sorgulama Yap</h5></div>
+                <div class="card-body">
+                    <EditForm Model="@searchModel" OnValidSubmit="HandleSearch" FormName="searchForm">
+                        <DataAnnotationsValidator />
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">İl</label>
+                                <InputSelect @bind-Value="SelectedProvinceId" class="form-select">
+                                    <option value="0">İl Seçiniz...</option>
+                                    @foreach (var p in provinces) { <option value="@p.Id">@p.Name</option> }
+                                </InputSelect>
+                                <ValidationMessage For="@(() => searchModel.ProvinceId)" />
+                            </div>
+                             <div class="col-md-4">
+                                <label class="form-label">İlçe</label>
+                                <InputSelect @bind-Value="SelectedCountyId" class="form-select" disabled="@(searchModel.ProvinceId == 0)">
+                                    <option value="0">İlçe Seçiniz...</option>
+                                     @foreach (var c in counties) { <option value="@c.Id">@c.Name</option> }
+                                </InputSelect>
+                                <ValidationMessage For="@(() => searchModel.CountyId)" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Mahalle</label>
+                                <InputSelect @bind-Value="SelectedNeighbourhoodId" class="form-select" disabled="@(searchModel.CountyId == 0)">
+                                    <option value="0">Mahalle Seçiniz...</option>
+                                     @foreach (var n in neighbourhoods) { <option value="@n.Id">@n.Name</option> }
+                                </InputSelect>
+                            </div>
+                        </div>
+                        
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <InputCheckbox @bind-Value="searchModel.HasStreet" class="form-check-input" />
+                                    <label class="form-check-label">Caddeye Göre Ara</label>
+                                </div>
+                                @if (searchModel.HasStreet)
+                                {
+                                    <InputSelect @bind-Value="searchModel.StreetId" class="form-select form-select-sm mt-2" disabled="@(searchModel.NeighbourhoodId is null or 0)">
+                                        <option value="">Cadde Seçiniz...</option>
+                                        @foreach (var s in streets) { <option value="@s.Id">@s.Name</option> }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => searchModel.StreetId)" />
+                                }
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <InputCheckbox @bind-Value="searchModel.HasSite" class="form-check-input" />
+                                    <label class="form-check-label">Siteye Göre Ara</label>
+                                </div>
+                                @if (searchModel.HasSite)
+                                {
+                                    <InputSelect @bind-Value="searchModel.SiteId" class="form-select form-select-sm mt-2" disabled="@(searchModel.NeighbourhoodId is null or 0)">
+                                        <option value="">Site Seçiniz...</option>
+                                        @foreach (var s in sites) { <option value="@s.Id">@s.Name</option> }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => searchModel.SiteId)" />
+                                }
+                            </div>
+                        </div>
+                        <hr />
+                        <button type="submit" class="btn btn-primary" disabled="@(isFormLoading || usageInfo.DayRemaining <= 0)">
+                            @if (isFormLoading) { <span><span class="spinner-border spinner-border-sm"></span> Sorgulanıyor...</span> }
+                            else { <span>Sorgula</span> }
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger mt-4" role="alert">@errorMessage</div>
+        }
+
+        @if (searchResults.Any())
+        {
+            <div class="mt-4">
+                <h4>Sorgu Sonuçları</h4>
+                <ul class="list-group shadow-sm">
+                    @foreach (var item in searchResults)
+                    {
+                        <li class="list-group-item">@item</li>
+                    }
+                </ul>
+            </div>
+        }
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    private SearchRequestDto searchModel = new();
+    private List<LookupItem> provinces = new();
+    private List<LookupItem> counties = new();
+    private List<LookupItem> neighbourhoods = new();
+    private List<LookupItem> streets = new();
+    private List<LookupItem> sites = new();
+
+    private UsageInfo? usageInfo;
+    private List<string> searchResults = new();
+    private string? errorMessage;
+    private bool isPageLoading = true;
+    private bool isFormLoading = false;
+    private string? currentUserId;
+
+    public int SelectedProvinceId
+    {
+        get => searchModel.ProvinceId;
+        set
+        {
+            searchModel.ProvinceId = value;
+            _ = LoadCountiesAsync(value);
+        }
+    }
+
+    public int SelectedCountyId
+    {
+        get => searchModel.CountyId;
+        set
+        {
+            searchModel.CountyId = value;
+            _ = LoadNeighbourhoodsAsync(value);
+        }
+    }
+
+    public int? SelectedNeighbourhoodId
+    {
+        get => searchModel.NeighbourhoodId;
+        set
+        {
+            searchModel.NeighbourhoodId = value;
+            _ = LoadStreetsAndSitesAsync(value);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        currentUserId = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!string.IsNullOrEmpty(currentUserId))
+        {
+            try
+            {
+                await using var db = DbFactory.CreateDbContext();
+                var usageTask = QuotaService.GetUsageAsync(currentUserId);
+                var provincesTask = db.Provinces.OrderBy(p => p.Name).Select(p => new LookupItem(p.Id, p.Name)).ToListAsync();
+                await Task.WhenAll(usageTask, provincesTask);
+                usageInfo = usageTask.Result;
+                provinces = provincesTask.Result;
+            }
+            catch (Exception ex) { errorMessage = "Başlangıç verileri yüklenirken bir hata oluştu: " + ex.Message; }
+        }
+        isPageLoading = false;
+    }
+
+    private async Task LoadCountiesAsync(int provinceId)
+    {
+        counties.Clear();
+        neighbourhoods.Clear();
+        streets.Clear();
+        sites.Clear();
+        searchModel.CountyId = 0;
+        searchModel.NeighbourhoodId = null;
+        searchModel.StreetId = null;
+        searchModel.SiteId = null;
+
+        if (provinceId > 0)
+        {
+            try
+            {
+                await using var db = DbFactory.CreateDbContext();
+                counties = await db.Counties.Where(c => c.ProvinceId == provinceId).OrderBy(c => c.Name).Select(c => new LookupItem(c.Id, c.Name)).ToListAsync();
+            }
+            catch (Exception ex) { errorMessage = "İlçeler yüklenirken hata oluştu: " + ex.Message; }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+    
+    private async Task LoadNeighbourhoodsAsync(int countyId)
+    {
+        neighbourhoods.Clear();
+        streets.Clear();
+        sites.Clear();
+        searchModel.NeighbourhoodId = null;
+        searchModel.StreetId = null;
+        searchModel.SiteId = null;
+
+        if (countyId > 0)
+        {
+            try
+            {
+                await using var db = DbFactory.CreateDbContext();
+                neighbourhoods = await db.Neighbourhoods.Where(n => n.CountyId == countyId).OrderBy(n => n.Name).Select(n => new LookupItem(n.Id, n.Name)).ToListAsync();
+            }
+            catch (Exception ex) { errorMessage = "Mahalleler yüklenirken hata oluştu: " + ex.Message; }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadStreetsAndSitesAsync(int? neighbourhoodId)
+    {
+        streets.Clear();
+        sites.Clear();
+        searchModel.StreetId = null;
+        searchModel.SiteId = null;
+
+        if (neighbourhoodId.HasValue && neighbourhoodId > 0)
+        {
+            try
+            {
+                await using var db = DbFactory.CreateDbContext();
+                var streetsTask = db.Streets.Where(s => s.NeighbourhoodId == neighbourhoodId.Value).OrderBy(s => s.Name).Select(s => new LookupItem(s.Id, s.Name)).ToListAsync();
+                var sitesTask = db.Sites.Where(s => s.NeighbourhoodId == neighbourhoodId.Value).OrderBy(s => s.Name).Select(s => new LookupItem(s.Id, s.Name)).ToListAsync();
+
+                await Task.WhenAll(streetsTask, sitesTask);
+
+                streets = streetsTask.Result;
+                sites = sitesTask.Result;
+            }
+            catch (Exception ex) { errorMessage = "Cadde/Site bilgileri yüklenirken hata oluştu: " + ex.Message; }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+    
+    private async Task HandleSearch()
+    {
+        if (string.IsNullOrEmpty(currentUserId))
+        {
+            errorMessage = "Sorgu yapmak için giriş yapmalısınız.";
+            return;
+        }
+
+        isFormLoading = true;
+        errorMessage = null;
+        searchResults.Clear();
+        await InvokeAsync(StateHasChanged); 
+        
+        try
+        {
+            var (newUsageInfo, results) = await QuotaService.TryConsumeAndSearchAsync(currentUserId, searchModel);
+            usageInfo = newUsageInfo;
+            searchResults = results;
+        }
+        catch (QuotaException ex)
+        {
+            errorMessage = ex.Message;
+            if(currentUserId is not null)
+            {
+                usageInfo = await QuotaService.GetUsageAsync(currentUserId);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Sorgulama sırasında beklenmedik bir hata oluştu: " + ex.Message;
+        }
+
+        isFormLoading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+    
+    public record LookupItem(int Id, string Name);
+}
